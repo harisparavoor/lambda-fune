@@ -1,0 +1,462 @@
+name: Multi-env-lambda-AnalyticsReport-portal-v1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# ============================================================================
+# JOB 1
+# Resolve environment from the GitHub branch
+#
+# Branch mapping:
+#   dev       -> dev
+#   hotfix/*  -> dev
+#   sit       -> sit
+#   uat       -> uat
+#   prod      -> prod
+#
+# No branch input.
+# No environment input.
+# ============================================================================
+
+jobs:
+
+  resolve-environment:
+
+    name: Resolve deployment environment
+
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      branch: ${{ steps.resolve.outputs.branch }}
+
+    steps:
+
+      # ----------------------------------------------------------------------
+      # Resolve environment from branch
+      # ----------------------------------------------------------------------
+
+      - name: Resolve environment from branch
+        id: resolve
+        shell: bash
+
+        env:
+          BRANCH: ${{ github.ref_name }}
+
+        run: |
+          set -euo pipefail
+
+          echo "GitHub branch: $BRANCH"
+
+          case "$BRANCH" in
+
+            dev)
+              ENVIRONMENT="dev"
+              ;;
+
+            hotfix/*)
+              ENVIRONMENT="dev"
+              ;;
+
+            sit)
+              ENVIRONMENT="sit"
+              ;;
+
+            uat)
+              ENVIRONMENT="uat"
+              ;;
+
+            prod)
+              ENVIRONMENT="prod"
+              ;;
+
+            *)
+              echo "::error::Branch '$BRANCH' is not allowed for deployment."
+              echo "::error::Allowed branches:"
+              echo "::error::  dev"
+              echo "::error::  hotfix/*"
+              echo "::error::  sit"
+              echo "::error::  uat"
+              echo "::error::  prod"
+              exit 1
+              ;;
+
+          esac
+
+          echo "=========================================="
+          echo "Deployment Resolution"
+          echo "=========================================="
+          echo "Branch      : $BRANCH"
+          echo "Environment : $ENVIRONMENT"
+          echo "=========================================="
+
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+
+
+# ============================================================================
+# JOB 2
+# Build and deploy Lambda application
+# ============================================================================
+
+  deploy:
+
+    name: Deploy Lambda to ${{ needs.resolve-environment.outputs.environment }}
+
+    needs:
+      - resolve-environment
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 30
+
+    # ------------------------------------------------------------------------
+    # GitHub Environment
+    #
+    # Environment is automatically resolved from the branch.
+    #
+    # dev       -> GitHub Environment: dev
+    # hotfix/*  -> GitHub Environment: dev
+    # sit       -> GitHub Environment: sit
+    # uat       -> GitHub Environment: uat
+    # prod      -> GitHub Environment: prod
+    #
+    # Configure required reviewers for prod under:
+    # Repository -> Settings -> Environments -> prod
+    # ------------------------------------------------------------------------
+
+    environment:
+      name: ${{ needs.resolve-environment.outputs.environment }}
+
+    # ------------------------------------------------------------------------
+    # Prevent simultaneous deployments to the same environment.
+    # ------------------------------------------------------------------------
+
+    concurrency:
+      group: lambda-deployment-${{ needs.resolve-environment.outputs.environment }}
+      cancel-in-progress: false
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+
+      # ======================================================================
+      # DEPLOYMENT INFORMATION
+      # ======================================================================
+
+      - name: Deployment information
+        shell: bash
+
+        env:
+          BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+          ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+
+        run: |
+          echo "=========================================="
+          echo "Deployment Information"
+          echo "=========================================="
+          echo "Repository  : $GITHUB_REPOSITORY"
+          echo "Branch      : $BRANCH"
+          echo "Environment : $ENVIRONMENT"
+          echo "=========================================="
+
+      # ======================================================================
+      # VALIDATE REQUIRED CONFIGURATION
+      # ======================================================================
+      - name: Validate required configuration
+        shell: bash
+        env:
+          TARGET_ENV: ${{ needs.resolve-environment.outputs.environment }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+
+          check() {
+            local name="$1"
+            local value="$2"
+
+            if [[ -z "$value" ]]; then
+              echo "::error::Missing required variable '$name' for environment '$TARGET_ENV'"
+              missing=1
+            fi
+          }
+
+          echo "Validating AWS/Lambda configuration..."
+          check AWS_REGION                            "${{ vars.AWS_REGION }}"
+          check LAMBDA_FUNCTION_NAME                  "${{ vars.LAMBDA_FUNCTION_NAME }}"
+          check PYTHON_VERSION                        "${{ vars.PYTHON_VERSION }}"
+          check APP_SOURCE_PATH                       "${{ vars.APP_SOURCE_PATH }}"
+          check AWS_ROLE_ARN                          "${{ secrets.AWS_ROLE_ARN }}"
+
+          echo "Validating application (Lambda environment) values..."
+          check BEDROCK_EMBEDDING_MODEL               "${{ vars.BEDROCK_EMBEDDING_MODEL }}"
+          check LAMBDA_NAME 						  "${{ vars.LAMBDA_FUNCTION_NAME }}"
+          check OPENSEARCH_ENDPOINT                   "${{ vars.OPENSEARCH_ENDPOINT }}"
+          check OPENSEARCH_INDEX_NAME                 "${{ vars.OPENSEARCH_INDEX_NAME }}"
+          check OPENSEARCH_SECRET_NAME                "${{ vars.OPENSEARCH_SECRET_NAME }}"
+          check SERVICE_CONNECTION_CLIENT_ID          "${{ vars.SERVICE_CONNECTION_CLIENT_ID }}"
+          check SERVICE_CONNECTION_SECRET_NAME        "${{ vars.SERVICE_CONNECTION_SECRET_NAME }}"
+          check SERVICE_CONNECTION_TENANT_ID          "${{ vars.SERVICE_CONNECTION_TENANT_ID }}"
+          check SP_AWS_REGION                         "${{ vars.AWS_REGION }}"
+          check SP_DRIVE_IDS                          "${{ vars.SP_DRIVE_IDS }}"
+          check SP_DRIVE_NAMES                        "${{ vars.SP_DRIVE_NAMES }}"
+          check SP_MONITOR_FILES                      "${{ vars.SP_MONITOR_FILES }}"
+          check SP_MONITOR_PAGES                      "${{ vars.SP_MONITOR_PAGES }}"
+          check SP_SITE_ID                            "${{ vars.SP_SITE_ID }}"
+          check SP_SITE_NAME                          "${{ vars.SP_SITE_NAME }}"
+          check SQS_QUEUE_URL                         "${{ vars.SQS_QUEUE_URL }}"
+          check TEXTRACT_NOTIFICATIONS_TABLE          "${{ vars.TEXTRACT_NOTIFICATIONS_TABLE }}"
+          check TEXTRACT_S3_BUCKET                    "${{ vars.TEXTRACT_S3_BUCKET }}"
+          check TEXTRACT_SNS_TOPIC_ARN                "${{ vars.TEXTRACT_SNS_TOPIC_ARN }}"
+
+          # Environment-specific configuration.
+          case "$TARGET_ENV" in
+
+            prod)
+              check "PROD_ENV_SPECIFIC_VALUE" "${{ vars.PROD_ENV_SPECIFIC_VALUE }}"
+              ;;
+
+            dev)
+              check "DEV_ENV_SPECIFIC_VALUE"  "${{ vars.DEV_ENV_SPECIFIC_VALUE }}"
+              ;;
+
+            sit)
+              check "SIT_ENV_SPECIFIC_VALUE"  "${{ vars.SIT_ENV_SPECIFIC_VALUE }}"
+              ;;
+
+            uat)
+              check "UAT_ENV_SPECIFIC_VALUE"  "${{ vars.UAT_ENV_SPECIFIC_VALUE }}"
+              ;;
+
+            *)
+              echo "::error::Unknown environment '$TARGET_ENV'."
+              missing=1
+              ;;
+
+          esac
+
+          if [[ "$missing" -ne 0 ]]; then
+            echo "::error::One or more required configuration values are missing."
+            exit 1
+          fi
+
+          echo "All required configuration values are present."
+
+
+      # ======================================================================
+      # Checkout selected branch
+      # ======================================================================
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+
+      # ======================================================================
+      # Setup Python and build
+      # ======================================================================
+      - name: Setup Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ vars.PYTHON_VERSION }}
+
+      - name: Build Lambda package
+        shell: bash
+
+        env:
+          APP_SOURCE_PATH: ${{ vars.APP_SOURCE_PATH }}
+          PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+
+        run: |
+          set -euo pipefail
+          SRC="${APP_SOURCE_PATH%/}"
+
+          rm -rf build lambda-package.zip
+          mkdir -p build
+
+          REQ="$SRC/requirements.txt"
+          [[ -f "$REQ" ]] || REQ="requirements.txt"
+          if [[ -f "$REQ" ]]; then
+            pip install -r "$REQ" -t build/ \
+              --platform manylinux2014_x86_64 \
+              --implementation cp \
+              --python-version "$PYTHON_VERSION" \
+              --only-binary=:all: --upgrade
+          fi
+
+          cp -r "$SRC"/. build/
+          (cd build && zip -qr ../lambda-package.zip . -x "*.pyc" "*__pycache__/*" "tests/*")
+          ls -lh lambda-package.zip
+
+      # ======================================================================
+      # Configure AWS credentials (OIDC)
+      # ======================================================================
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # ======================================================================
+      # UPDATE ENVIRONMENT VARIABLES (merge: add new, update existing, keep rest)
+      # ======================================================================
+
+      - name: Update Lambda environment variables
+        shell: bash
+
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          BEDROCK_EMBEDDING_MODEL: ${{ vars.BEDROCK_EMBEDDING_MODEL }}
+          ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+          LAMBDA_NAME: ${{ vars.LAMBDA_NAME }}
+          OPENSEARCH_ENDPOINT: ${{ vars.OPENSEARCH_ENDPOINT }}
+          OPENSEARCH_INDEX_NAME: ${{ vars.OPENSEARCH_INDEX_NAME }}
+          OPENSEARCH_SECRET_NAME: ${{ vars.OPENSEARCH_SECRET_NAME }}
+          SERVICE_CONNECTION_CLIENT_ID: ${{ vars.SERVICE_CONNECTION_CLIENT_ID }}
+          SERVICE_CONNECTION_SECRET_NAME: ${{ vars.SERVICE_CONNECTION_SECRET_NAME }}
+          SERVICE_CONNECTION_TENANT_ID: ${{ vars.SERVICE_CONNECTION_TENANT_ID }}
+          SP_AWS_REGION: ${{ vars.SP_AWS_REGION }}
+          SP_DRIVE_IDS: ${{ vars.SP_DRIVE_IDS }}
+          SP_DRIVE_NAMES: ${{ vars.SP_DRIVE_NAMES }}
+          SP_MONITOR_FILES: ${{ vars.SP_MONITOR_FILES }}
+          SP_MONITOR_PAGES: ${{ vars.SP_MONITOR_PAGES }}
+          SP_SITE_ID: ${{ vars.SP_SITE_ID }}
+          SP_SITE_NAME: ${{ vars.SP_SITE_NAME }}
+          SQS_QUEUE_URL: ${{ vars.SQS_QUEUE_URL }}
+          TEXTRACT_NOTIFICATIONS_TABLE: ${{ vars.TEXTRACT_NOTIFICATIONS_TABLE }}
+          TEXTRACT_S3_BUCKET: ${{ vars.TEXTRACT_S3_BUCKET }}
+          TEXTRACT_SNS_TOPIC_ARN: ${{ vars.TEXTRACT_SNS_TOPIC_ARN }}
+
+        run: |
+          set -euo pipefail
+
+          # Names here become Lambda environment variable names.
+          # To add a new variable: add the name below, add it to this step's
+          # env block and to the validation step (env block + check line),
+          # then create it in the GitHub Environment variables.
+          NAMES=(
+            BEDROCK_EMBEDDING_MODEL
+            ENVIRONMENT
+            LAMBDA_NAME
+            OPENSEARCH_ENDPOINT
+            OPENSEARCH_INDEX_NAME
+            OPENSEARCH_SECRET_NAME
+            SERVICE_CONNECTION_CLIENT_ID
+            SERVICE_CONNECTION_SECRET_NAME
+            SERVICE_CONNECTION_TENANT_ID
+            SP_AWS_REGION
+            SP_DRIVE_IDS
+            SP_DRIVE_NAMES
+            SP_MONITOR_FILES
+            SP_MONITOR_PAGES
+            SP_SITE_ID
+            SP_SITE_NAME
+            SQS_QUEUE_URL
+            TEXTRACT_NOTIFICATIONS_TABLE
+            TEXTRACT_S3_BUCKET
+            TEXTRACT_SNS_TOPIC_ARN
+          )
+
+          # ---- Build the new variable set ----
+          NEW='{}'
+          for name in "${NAMES[@]}"; do
+            NEW=$(jq -c --arg k "$name" --arg v "${!name}" '. + {($k): $v}' <<< "$NEW")
+          done
+
+          # ---- Read current Lambda variables ----
+          CURRENT=$(aws lambda get-function-configuration \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --query 'Environment.Variables' \
+            --output json)
+
+          if [[ -z "$CURRENT" || "$CURRENT" == "null" ]]; then
+            CURRENT='{}'
+          fi
+
+          # ---- Report changes (names only, values are never printed) ----
+          echo "Added   : $(jq -r -n --argjson c "$CURRENT" --argjson n "$NEW" '[$n|keys[]|select(. as $k|$c|has($k)|not)]|join(", ")')"
+          echo "Updated : $(jq -r -n --argjson c "$CURRENT" --argjson n "$NEW" '[$n|keys[]|select(. as $k|$c|has($k) and $c[$k] != $n[$k])]|join(", ")')"
+          echo "Kept    : $(jq -r -n --argjson c "$CURRENT" --argjson n "$NEW" '[$c|keys[]|select(. as $k|$n|has($k)|not)]|join(", ")')"
+
+          # ---- Merge: existing + new (new wins) ----
+          ENV_FILE="$RUNNER_TEMP/lambda-env.json"
+          umask 077
+          jq -c -n --argjson c "$CURRENT" --argjson n "$NEW" '{Variables: ($c + $n)}' > "$ENV_FILE"
+
+          aws lambda update-function-configuration \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --environment "file://$ENV_FILE" \
+            --query '{LastModified:LastModified,State:State,LastUpdateStatus:LastUpdateStatus}' \
+            --output table
+
+          echo "Waiting for configuration update to complete..."
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_FUNCTION_NAME"
+
+          rm -f "$ENV_FILE"
+
+
+      # ======================================================================
+      # Deploy to Lambda
+      # ======================================================================
+      - name: Deploy to Lambda
+        id: lambda
+        shell: bash
+
+        env:
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+
+        run: |
+          set -euo pipefail
+
+          echo "Updating function: $FUNCTION_NAME"
+
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://lambda-package.zip
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          VERSION=$(aws lambda publish-version \
+            --function-name "$FUNCTION_NAME" \
+            --description "Deployed from $BRANCH @ ${GITHUB_SHA::7}" \
+            --query Version --output text)
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+
+      # ======================================================================
+      # DEPLOYMENT SUMMARY
+      # ======================================================================
+      - name: Deployment summary
+        shell: bash
+
+        env:
+          BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+          ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          VERSION: ${{ steps.lambda.outputs.version }}
+
+        run: |
+          echo "=========================================="
+          echo "Deployment Completed"
+          echo "=========================================="
+          echo "Branch      : $BRANCH"
+          echo "Environment : $ENVIRONMENT"
+          echo "Function    : $FUNCTION_NAME"
+          echo "Version     : $VERSION"
+          echo "=========================================="
