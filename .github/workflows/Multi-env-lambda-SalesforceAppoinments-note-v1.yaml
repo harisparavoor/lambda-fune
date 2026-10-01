@@ -1,4 +1,4 @@
-name: Multi-env-lambda-AppoinmentsProcessor-note-v1
+name: Multi-env-lambda-SalesforceAppoinments-note-v1.yaml
 
 on:
   workflow_dispatch:
