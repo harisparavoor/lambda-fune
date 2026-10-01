@@ -303,6 +303,7 @@ jobs:
           REPORT_DAY_OFFSET: 			 ${{ vars.REPORT_DAY_OFFSET }}
           REPORT_PERIOD_MODE:            ${{ vars.REPORT_PERIOD_MODE }}
           SNS_TOPIC_ARN:                 ${{ vars.SNS_TOPIC_ARN }}
+          LAMBDA_FUNCTION_NAME:          ${{ vars.LAMBDA_FUNCTION_NAME }}
          
         run: |
           set -euo pipefail
