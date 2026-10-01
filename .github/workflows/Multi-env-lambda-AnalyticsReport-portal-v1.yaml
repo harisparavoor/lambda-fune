@@ -320,14 +320,14 @@ jobs:
           LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           BEDROCK_EMBEDDING_MODEL: ${{ vars.BEDROCK_EMBEDDING_MODEL }}
           ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
-          LAMBDA_NAME: ${{ vars.LAMBDA_NAME }}
+          LAMBDA_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           OPENSEARCH_ENDPOINT: ${{ vars.OPENSEARCH_ENDPOINT }}
           OPENSEARCH_INDEX_NAME: ${{ vars.OPENSEARCH_INDEX_NAME }}
           OPENSEARCH_SECRET_NAME: ${{ vars.OPENSEARCH_SECRET_NAME }}
           SERVICE_CONNECTION_CLIENT_ID: ${{ vars.SERVICE_CONNECTION_CLIENT_ID }}
           SERVICE_CONNECTION_SECRET_NAME: ${{ vars.SERVICE_CONNECTION_SECRET_NAME }}
           SERVICE_CONNECTION_TENANT_ID: ${{ vars.SERVICE_CONNECTION_TENANT_ID }}
-          SP_AWS_REGION: ${{ vars.SP_AWS_REGION }}
+          SP_AWS_REGION: ${{ vars.AWS_REGION }}
           SP_DRIVE_IDS: ${{ vars.SP_DRIVE_IDS }}
           SP_DRIVE_NAMES: ${{ vars.SP_DRIVE_NAMES }}
           SP_MONITOR_FILES: ${{ vars.SP_MONITOR_FILES }}
