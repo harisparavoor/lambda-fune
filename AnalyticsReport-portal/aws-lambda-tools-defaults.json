@@ -1,0 +1,10 @@
+{
+  "profile": "default",
+  "region": "ap-south-1",
+  "configuration": "Release",
+  "function-runtime": "dotnet10",
+  "function-memory-size": 256,
+  "function-timeout": 30,
+  "function-handler": "LambdaTest::EnvVarLambda.Function::FunctionHandler",
+  "environment-variables": "PDF_BUCKET_NAME=my-pdf-bucket;REPORT_DAY_OFFSET=1;REPORT_PERIOD_MODE=DAILY;SNS_TOPIC_ARN=arn:aws:sns:ap-south-1:123456789012:my-topic"
+}

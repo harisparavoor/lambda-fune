@@ -1,4 +1,4 @@
-name: Multi-env-lambda-AnalyticsReport-portal-v1
+name: Multi-env-lambda-AppoinmentsProcessor-note-v1
 
 on:
   workflow_dispatch:
@@ -198,10 +198,10 @@ jobs:
           check AWS_ROLE_ARN                          "${{ secrets.AWS_ROLE_ARN }}"
 
           echo "Validating application (Lambda environment) values..."
-          check PDF_BUCKET_NAME               "${{ vars.PDF_BUCKET_NAME }}"
-          check REPORT_DAY_OFFSET 			  "${{ vars.REPORT_DAY_OFFSET }}"
-          check REPORT_PERIOD_MODE            "${{ vars.REPORT_PERIOD_MODE }}"
-          check SNS_TOPIC_ARN                 "${{ vars.SNS_TOPIC_ARN }}"
+          check PERSONNEL_BATCH_SIZE            "${{ vars.PERSONNEL_BATCH_SIZE }}"
+          check PROCESSOR_FUNCTION_NAME 		"${{ vars.PROCESSOR_FUNCTION_NAME }}"
+          check PURGE_CUTOFF_DAYS               "${{ vars.PURGE_CUTOFF_DAYS }}"
+          
           
           # Environment-specific configuration.
           case "$TARGET_ENV" in
@@ -298,12 +298,10 @@ jobs:
         shell: bash
 
         env:
-
-          PDF_BUCKET_NAME:               ${{ vars.PDF_BUCKET_NAME }}
-          REPORT_DAY_OFFSET: 			 ${{ vars.REPORT_DAY_OFFSET }}
-          REPORT_PERIOD_MODE:            ${{ vars.REPORT_PERIOD_MODE }}
-          SNS_TOPIC_ARN:                 ${{ vars.SNS_TOPIC_ARN }}
-          LAMBDA_FUNCTION_NAME:          ${{ vars.LAMBDA_FUNCTION_NAME }}
+          PERSONNEL_BATCH_SIZE:         ${{ vars.PERSONNEL_BATCH_SIZE }}
+          PROCESSOR_FUNCTION_NAME: 		${{ vars.PROCESSOR_FUNCTION_NAME }}
+          PURGE_CUTOFF_DAYS:            ${{ vars.PURGE_CUTOFF_DAYS }}
+          LAMBDA_FUNCTION_NAME:         ${{ vars.LAMBDA_FUNCTION_NAME }}
          
         run: |
           set -euo pipefail
@@ -314,10 +312,9 @@ jobs:
           # then create it in the GitHub Environment variables.
           NAMES=(
 
-          PDF_BUCKET_NAME              
-          REPORT_DAY_OFFSET 			 
-          REPORT_PERIOD_MODE          
-          SNS_TOPIC_ARN 
+          PERSONNEL_BATCH_SIZE        
+          PROCESSOR_FUNCTION_NAME 		
+          PURGE_CUTOFF_DAYS           
           )
 
           # ---- Build the new variable set ----
