@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Amazon.Lambda.Core;
 
 // Tells Lambda how to serialize input/output
@@ -9,17 +10,32 @@ public class Function
 {
     // Handler: LambdaTest::EnvVarLambda.Function::FunctionHandler
     //
-    // Test event = one JSON string with variable names separated by space and/or comma:
+    // Test event can be either:
     //   "PERSONNEL_BATCH_SIZE PROCESSOR_FUNCTION_NAME, PURGE_CUTOFF_DAYS"
-    public string FunctionHandler(string input, ILambdaContext context)
+    //   {"vars": "PERSONNEL_BATCH_SIZE PROCESSOR_FUNCTION_NAME, PURGE_CUTOFF_DAYS"}
+    public string FunctionHandler(JsonElement input, ILambdaContext context)
     {
-        if (string.IsNullOrWhiteSpace(input))
+        string? text = null;
+
+        if (input.ValueKind == JsonValueKind.String)
         {
-            return "Pass variable names in the test event, e.g. \"hari NAME2, NAME3\"";
+            text = input.GetString();
+        }
+        else if (input.ValueKind == JsonValueKind.Object &&
+                 input.TryGetProperty("vars", out var vars) &&
+                 vars.ValueKind == JsonValueKind.String)
+        {
+            text = vars.GetString();
         }
 
-        var names = input.Split(new[] { ' ', ',', ';', '\t', '\n', '\r' },
-                                StringSplitOptions.RemoveEmptyEntries);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "Pass variable names in the test event, e.g. \"NAME1 NAME2, NAME3\" " +
+                   "or {\"vars\": \"NAME1 NAME2, NAME3\"}";
+        }
+
+        var names = text.Split(new[] { ' ', ',', ';', '\t', '\n', '\r' },
+                               StringSplitOptions.RemoveEmptyEntries);
 
         var lines = names.Select(name =>
             $"{name} = {Environment.GetEnvironmentVariable(name) ?? "(not set)"}");
