@@ -1,4 +1,4 @@
-name: Multi-env-lambda-AnalyticsReport-portal-v1
+name: Multi-env-lambda-AnalyticsReport-chat-v1
 
 on:
   workflow_dispatch:
@@ -193,16 +193,31 @@ jobs:
           echo "Validating AWS/Lambda configuration..."
           check AWS_REGION                            "${{ vars.AWS_REGION }}"
           check LAMBDA_FUNCTION_NAME                  "${{ vars.LAMBDA_FUNCTION_NAME }}"
-          check DOTNET_VERSION                        "${{ vars.DOTNET_VERSION }}"
+          check PYTHON_VERSION                        "${{ vars.PYTHON_VERSION }}"
           check APP_SOURCE_PATH                       "${{ vars.APP_SOURCE_PATH }}"
           check AWS_ROLE_ARN                          "${{ secrets.AWS_ROLE_ARN }}"
 
           echo "Validating application (Lambda environment) values..."
-          check PDF_BUCKET_NAME               "${{ vars.PDF_BUCKET_NAME }}"
-          check REPORT_DAY_OFFSET 			  "${{ vars.REPORT_DAY_OFFSET }}"
-          check REPORT_PERIOD_MODE            "${{ vars.REPORT_PERIOD_MODE }}"
-          check SNS_TOPIC_ARN                 "${{ vars.SNS_TOPIC_ARN }}"
-          
+          check BEDROCK_EMBEDDING_MODEL               "${{ vars.BEDROCK_EMBEDDING_MODEL }}"
+          check LAMBDA_NAME 						  "${{ vars.LAMBDA_FUNCTION_NAME }}"
+          check OPENSEARCH_ENDPOINT                   "${{ vars.OPENSEARCH_ENDPOINT }}"
+          check OPENSEARCH_INDEX_NAME                 "${{ vars.OPENSEARCH_INDEX_NAME }}"
+          check OPENSEARCH_SECRET_NAME                "${{ vars.OPENSEARCH_SECRET_NAME }}"
+          check SERVICE_CONNECTION_CLIENT_ID          "${{ vars.SERVICE_CONNECTION_CLIENT_ID }}"
+          check SERVICE_CONNECTION_SECRET_NAME        "${{ vars.SERVICE_CONNECTION_SECRET_NAME }}"
+          check SERVICE_CONNECTION_TENANT_ID          "${{ vars.SERVICE_CONNECTION_TENANT_ID }}"
+          check SP_AWS_REGION                         "${{ vars.AWS_REGION }}"
+          check SP_DRIVE_IDS                          "${{ vars.SP_DRIVE_IDS }}"
+          check SP_DRIVE_NAMES                        "${{ vars.SP_DRIVE_NAMES }}"
+          check SP_MONITOR_FILES                      "${{ vars.SP_MONITOR_FILES }}"
+          check SP_MONITOR_PAGES                      "${{ vars.SP_MONITOR_PAGES }}"
+          check SP_SITE_ID                            "${{ vars.SP_SITE_ID }}"
+          check SP_SITE_NAME                          "${{ vars.SP_SITE_NAME }}"
+          check SQS_QUEUE_URL                         "${{ vars.SQS_QUEUE_URL }}"
+          check TEXTRACT_NOTIFICATIONS_TABLE          "${{ vars.TEXTRACT_NOTIFICATIONS_TABLE }}"
+          check TEXTRACT_S3_BUCKET                    "${{ vars.TEXTRACT_S3_BUCKET }}"
+          check TEXTRACT_SNS_TOPIC_ARN                "${{ vars.TEXTRACT_SNS_TOPIC_ARN }}"
+
           # Environment-specific configuration.
           case "$TARGET_ENV" in
 
@@ -249,18 +264,19 @@ jobs:
 
 
       # ======================================================================
-      # Setup .NET and build
+      # Setup Python and build
       # ======================================================================
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5.6.0
         with:
-          dotnet-version: ${{ vars.DOTNET_VERSION }}
+          python-version: ${{ vars.PYTHON_VERSION }}
 
       - name: Build Lambda package
         shell: bash
 
         env:
           APP_SOURCE_PATH: ${{ vars.APP_SOURCE_PATH }}
+          PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
 
         run: |
           set -euo pipefail
@@ -269,15 +285,18 @@ jobs:
           rm -rf build lambda-package.zip
           mkdir -p build
 
-          dotnet restore "$SRC"
+          REQ="$SRC/requirements.txt"
+          [[ -f "$REQ" ]] || REQ="requirements.txt"
+          if [[ -f "$REQ" ]]; then
+            pip install -r "$REQ" -t build/ \
+              --platform manylinux2014_x86_64 \
+              --implementation cp \
+              --python-version "$PYTHON_VERSION" \
+              --only-binary=:all: --upgrade
+          fi
 
-          dotnet publish "$SRC" \
-            --configuration Release \
-            --runtime linux-x64 \
-            --self-contained false \
-            --output build
-
-          (cd build && zip -qr ../lambda-package.zip . -x "*.pdb")
+          cp -r "$SRC"/. build/
+          (cd build && zip -qr ../lambda-package.zip . -x "*.pyc" "*__pycache__/*" "tests/*")
           ls -lh lambda-package.zip
 
       # ======================================================================
@@ -298,13 +317,28 @@ jobs:
         shell: bash
 
         env:
+          LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          BEDROCK_EMBEDDING_MODEL: ${{ vars.BEDROCK_EMBEDDING_MODEL }}
+          ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+          LAMBDA_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          OPENSEARCH_ENDPOINT: ${{ vars.OPENSEARCH_ENDPOINT }}
+          OPENSEARCH_INDEX_NAME: ${{ vars.OPENSEARCH_INDEX_NAME }}
+          OPENSEARCH_SECRET_NAME: ${{ vars.OPENSEARCH_SECRET_NAME }}
+          SERVICE_CONNECTION_CLIENT_ID: ${{ vars.SERVICE_CONNECTION_CLIENT_ID }}
+          SERVICE_CONNECTION_SECRET_NAME: ${{ vars.SERVICE_CONNECTION_SECRET_NAME }}
+          SERVICE_CONNECTION_TENANT_ID: ${{ vars.SERVICE_CONNECTION_TENANT_ID }}
+          SP_AWS_REGION: ${{ vars.AWS_REGION }}
+          SP_DRIVE_IDS: ${{ vars.SP_DRIVE_IDS }}
+          SP_DRIVE_NAMES: ${{ vars.SP_DRIVE_NAMES }}
+          SP_MONITOR_FILES: ${{ vars.SP_MONITOR_FILES }}
+          SP_MONITOR_PAGES: ${{ vars.SP_MONITOR_PAGES }}
+          SP_SITE_ID: ${{ vars.SP_SITE_ID }}
+          SP_SITE_NAME: ${{ vars.SP_SITE_NAME }}
+          SQS_QUEUE_URL: ${{ vars.SQS_QUEUE_URL }}
+          TEXTRACT_NOTIFICATIONS_TABLE: ${{ vars.TEXTRACT_NOTIFICATIONS_TABLE }}
+          TEXTRACT_S3_BUCKET: ${{ vars.TEXTRACT_S3_BUCKET }}
+          TEXTRACT_SNS_TOPIC_ARN: ${{ vars.TEXTRACT_SNS_TOPIC_ARN }}
 
-          PDF_BUCKET_NAME:               ${{ vars.PDF_BUCKET_NAME }}
-          REPORT_DAY_OFFSET: 			 ${{ vars.REPORT_DAY_OFFSET }}
-          REPORT_PERIOD_MODE:            ${{ vars.REPORT_PERIOD_MODE }}
-          SNS_TOPIC_ARN:                 ${{ vars.SNS_TOPIC_ARN }}
-          LAMBDA_FUNCTION_NAME:          ${{ vars.LAMBDA_FUNCTION_NAME }}
-         
         run: |
           set -euo pipefail
 
@@ -313,11 +347,26 @@ jobs:
           # env block and to the validation step (env block + check line),
           # then create it in the GitHub Environment variables.
           NAMES=(
-
-          PDF_BUCKET_NAME              
-          REPORT_DAY_OFFSET 			 
-          REPORT_PERIOD_MODE          
-          SNS_TOPIC_ARN 
+            BEDROCK_EMBEDDING_MODEL
+            ENVIRONMENT
+            LAMBDA_NAME
+            OPENSEARCH_ENDPOINT
+            OPENSEARCH_INDEX_NAME
+            OPENSEARCH_SECRET_NAME
+            SERVICE_CONNECTION_CLIENT_ID
+            SERVICE_CONNECTION_SECRET_NAME
+            SERVICE_CONNECTION_TENANT_ID
+            SP_AWS_REGION
+            SP_DRIVE_IDS
+            SP_DRIVE_NAMES
+            SP_MONITOR_FILES
+            SP_MONITOR_PAGES
+            SP_SITE_ID
+            SP_SITE_NAME
+            SQS_QUEUE_URL
+            TEXTRACT_NOTIFICATIONS_TABLE
+            TEXTRACT_S3_BUCKET
+            TEXTRACT_SNS_TOPIC_ARN
           )
 
           # ---- Build the new variable set ----
@@ -369,7 +418,6 @@ jobs:
         env:
           FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           BRANCH: ${{ needs.resolve-environment.outputs.branch }}
-          LAMBDA_HANDLER: LambdaTest::EnvVarLambda.Function::FunctionHandler
 
         run: |
           set -euo pipefail
@@ -379,13 +427,6 @@ jobs:
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
             --zip-file fileb://lambda-package.zip
-
-          aws lambda wait function-updated \
-            --function-name "$FUNCTION_NAME"
-
-          aws lambda update-function-configuration \
-            --function-name "$FUNCTION_NAME" \
-            --handler "$LAMBDA_HANDLER"
 
           aws lambda wait function-updated \
             --function-name "$FUNCTION_NAME"
