@@ -369,6 +369,7 @@ jobs:
         env:
           FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+          LAMBDA_HANDLER: LambdaTest::EnvVarLambda.Function::FunctionHandler
 
         run: |
           set -euo pipefail
@@ -378,6 +379,13 @@ jobs:
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
             --zip-file fileb://lambda-package.zip
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          aws lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --handler "$LAMBDA_HANDLER"
 
           aws lambda wait function-updated \
             --function-name "$FUNCTION_NAME"
