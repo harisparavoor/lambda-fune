@@ -1,4 +1,4 @@
-name: Multi-env-lambda-SalesforceAppoinments-note-v1.yaml
+name: Multi-env-lambda-SalesforceAppoinments-note-v1
 
 on:
   workflow_dispatch:
@@ -198,7 +198,10 @@ jobs:
           check AWS_ROLE_ARN                          "${{ secrets.AWS_ROLE_ARN }}"
 
           echo "Validating application (Lambda environment) values..."
-         
+          check PERSONNEL_BATCH_SIZE            "${{ vars.PERSONNEL_BATCH_SIZE }}"
+          check PROCESSOR_FUNCTION_NAME 		    "${{ vars.PROCESSOR_FUNCTION_NAME }}"
+          check PURGE_CUTOFF_DAYS               "${{ vars.PURGE_CUTOFF_DAYS }}"
+          
           
           # Environment-specific configuration.
           case "$TARGET_ENV" in
@@ -295,6 +298,9 @@ jobs:
         shell: bash
 
         env:
+          PERSONNEL_BATCH_SIZE:         ${{ vars.PERSONNEL_BATCH_SIZE }}
+          PROCESSOR_FUNCTION_NAME: 		${{ vars.PROCESSOR_FUNCTION_NAME }}
+          PURGE_CUTOFF_DAYS:            ${{ vars.PURGE_CUTOFF_DAYS }}
           LAMBDA_FUNCTION_NAME:         ${{ vars.LAMBDA_FUNCTION_NAME }}
          
         run: |
@@ -305,7 +311,10 @@ jobs:
           # env block and to the validation step (env block + check line),
           # then create it in the GitHub Environment variables.
           NAMES=(
-        
+
+          PERSONNEL_BATCH_SIZE        
+          PROCESSOR_FUNCTION_NAME 		
+          PURGE_CUTOFF_DAYS           
           )
 
           # ---- Build the new variable set ----
