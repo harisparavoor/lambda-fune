@@ -245,8 +245,8 @@ jobs:
             pip install -r "$REQ" -t build/ \
               --platform manylinux2014_x86_64 \
               --implementation cp \
-              --python-version "$PYTHON_VERSION" \
-              --only-binary=:all: --upgrade
+              --python-version "$PYTHON_VERSION" 
+            
           fi
 
           cp -r "$SRC"/. build/
