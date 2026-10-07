@@ -7,7 +7,7 @@ namespace EnvVarLambda;
 
 public class Function
 {
-    // Handler: EnvVarLambda::EnvVarLambda.Function::FunctionHandler
+    // Handler: LambdaTest::EnvVarLambda.Function::FunctionHandler
     public string FunctionHandler(object input, ILambdaContext context)
     {
         string pdfBucketName    = Environment.GetEnvironmentVariable("PDF_BUCKET_NAME")    ?? "(not set)";

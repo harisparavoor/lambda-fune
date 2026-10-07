@@ -1,4 +1,4 @@
-name: Multi-env-lambda-AnalyticsReport-portal-v1
+name: Multi-env-lambda-AppoinmentsProcessor-note-v1.yaml
 
 on:
   workflow_dispatch:
@@ -198,10 +198,7 @@ jobs:
           check AWS_ROLE_ARN                          "${{ secrets.AWS_ROLE_ARN }}"
 
           echo "Validating application (Lambda environment) values..."
-          check PDF_BUCKET_NAME               "${{ vars.PDF_BUCKET_NAME }}"
-          check REPORT_DAY_OFFSET 			  "${{ vars.REPORT_DAY_OFFSET }}"
-          check REPORT_PERIOD_MODE            "${{ vars.REPORT_PERIOD_MODE }}"
-          check SNS_TOPIC_ARN                 "${{ vars.SNS_TOPIC_ARN }}"
+         
           
           # Environment-specific configuration.
           case "$TARGET_ENV" in
@@ -298,11 +295,7 @@ jobs:
         shell: bash
 
         env:
-
-          PDF_BUCKET_NAME:               ${{ vars.PDF_BUCKET_NAME }}
-          REPORT_DAY_OFFSET: 			 ${{ vars.REPORT_DAY_OFFSET }}
-          REPORT_PERIOD_MODE:            ${{ vars.REPORT_PERIOD_MODE }}
-          SNS_TOPIC_ARN:                 ${{ vars.SNS_TOPIC_ARN }}
+          LAMBDA_FUNCTION_NAME:         ${{ vars.LAMBDA_FUNCTION_NAME }}
          
         run: |
           set -euo pipefail
@@ -312,11 +305,7 @@ jobs:
           # env block and to the validation step (env block + check line),
           # then create it in the GitHub Environment variables.
           NAMES=(
-
-          PDF_BUCKET_NAME              
-          REPORT_DAY_OFFSET 			 
-          REPORT_PERIOD_MODE          
-          SNS_TOPIC_ARN 
+        
           )
 
           # ---- Build the new variable set ----
@@ -368,6 +357,7 @@ jobs:
         env:
           FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+          LAMBDA_HANDLER: LambdaTest::EnvVarLambda.Function::FunctionHandler
 
         run: |
           set -euo pipefail
@@ -377,6 +367,13 @@ jobs:
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
             --zip-file fileb://lambda-package.zip
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          aws lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --handler "$LAMBDA_HANDLER"
 
           aws lambda wait function-updated \
             --function-name "$FUNCTION_NAME"
