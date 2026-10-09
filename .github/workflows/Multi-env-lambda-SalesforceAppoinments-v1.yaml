@@ -252,7 +252,7 @@ jobs:
       # Setup .NET and build
       # ======================================================================
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v4.2.0
         with:
           dotnet-version: ${{ vars.DOTNET_VERSION }}
 
