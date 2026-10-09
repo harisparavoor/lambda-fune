@@ -1,0 +1,317 @@
+name: document-analyzer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# ============================================================================
+# JOB 1
+# Resolve environment from the GitHub branch
+#
+# Branch mapping:
+#   dev       -> dev
+#   hotfix/*  -> dev
+#   sit       -> sit
+#   uat       -> uat
+#   prod      -> prod
+#
+# No branch input.
+# No environment input.
+# ============================================================================
+
+jobs:
+
+  resolve-environment:
+
+    name: Resolve deployment environment
+
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      branch: ${{ steps.resolve.outputs.branch }}
+
+    steps:
+
+      # ----------------------------------------------------------------------
+      # Resolve environment from branch
+      # ----------------------------------------------------------------------
+
+      - name: Resolve environment from branch
+        id: resolve
+        shell: bash
+
+        env:
+          BRANCH: ${{ github.ref_name }}
+
+        run: |
+          set -euo pipefail
+
+          echo "GitHub branch: $BRANCH"
+
+          case "$BRANCH" in
+
+            dev)
+              ENVIRONMENT="dev"
+              ;;
+
+            hotfix/*)
+              ENVIRONMENT="dev"
+              ;;
+
+            sit)
+              ENVIRONMENT="sit"
+              ;;
+
+            uat)
+              ENVIRONMENT="uat"
+              ;;
+
+            prod)
+              ENVIRONMENT="prod"
+              ;;
+
+            *)
+              echo "::error::Branch '$BRANCH' is not allowed for deployment."
+              echo "::error::Allowed branches:"
+              echo "::error::  dev"
+              echo "::error::  hotfix/*"
+              echo "::error::  sit"
+              echo "::error::  uat"
+              echo "::error::  prod"
+              exit 1
+              ;;
+
+          esac
+
+          echo "=========================================="
+          echo "Deployment Resolution"
+          echo "=========================================="
+          echo "Branch      : $BRANCH"
+          echo "Environment : $ENVIRONMENT"
+          echo "=========================================="
+
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+
+
+# ============================================================================
+# JOB 2
+# Build and deploy Lambda application
+# ============================================================================
+
+  deploy:
+
+    name: Deploy Lambda to ${{ needs.resolve-environment.outputs.environment }}
+
+    needs:
+      - resolve-environment
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 30
+
+    # ------------------------------------------------------------------------
+    # GitHub Environment
+    #
+    # Environment is automatically resolved from the branch.
+    #
+    # dev       -> GitHub Environment: dev
+    # hotfix/*  -> GitHub Environment: dev
+    # sit       -> GitHub Environment: sit
+    # uat       -> GitHub Environment: uat
+    # prod      -> GitHub Environment: prod
+    #
+    # Configure required reviewers for prod under:
+    # Repository -> Settings -> Environments -> prod
+    # ------------------------------------------------------------------------
+
+    environment:
+      name: ${{ needs.resolve-environment.outputs.environment }}
+
+    # ------------------------------------------------------------------------
+    # Prevent simultaneous deployments to the same environment.
+    # ------------------------------------------------------------------------
+
+    concurrency:
+      group: lambda-deployment-${{ needs.resolve-environment.outputs.environment }}
+      cancel-in-progress: false
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+
+      # ======================================================================
+      # DEPLOYMENT INFORMATION
+      # ======================================================================
+
+      - name: Deployment information
+        shell: bash
+
+        env:
+          BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+          ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+
+        run: |
+          echo "=========================================="
+          echo "Deployment Information"
+          echo "=========================================="
+          echo "Repository  : $GITHUB_REPOSITORY"
+          echo "Branch      : $BRANCH"
+          echo "Environment : $ENVIRONMENT"
+          echo "=========================================="
+
+      # ======================================================================
+      # VALIDATE REQUIRED CONFIGURATION
+      # ======================================================================
+      - name: Validate required configuration
+        shell: bash
+        env:
+          TARGET_ENV: ${{ needs.resolve-environment.outputs.environment }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+
+          check() {
+            local name="$1"
+            local value="$2"
+
+            if [[ -z "$value" ]]; then
+              echo "::error::Missing required variable '$name' for environment '$TARGET_ENV'"
+              missing=1
+            fi
+          }
+
+          echo "Validating AWS/Lambda configuration..."
+          check AWS_REGION                            "${{ vars.AWS_REGION }}"
+          check LAMBDA_FUNCTION_NAME                  "${{ vars.LAMBDA_FUNCTION_NAME }}"
+          check PYTHON_VERSION                        "${{ vars.PYTHON_VERSION }}"
+          check APP_SOURCE_PATH                       "${{ vars.APP_SOURCE_PATH }}"
+          check AWS_ROLE_ARN                          "${{ secrets.AWS_ROLE_ARN }}"
+
+        
+          if [[ "$missing" -ne 0 ]]; then
+            echo "::error::One or more required configuration values are missing."
+            exit 1
+          fi
+
+          echo "All required configuration values are present."
+
+
+      # ======================================================================
+      # Checkout selected branch
+      # ======================================================================
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+
+      # ======================================================================
+      # Setup Python and build
+      # ======================================================================
+      - name: Setup Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ vars.PYTHON_VERSION }}
+
+      - name: Build Lambda package
+        shell: bash
+
+        env:
+          APP_SOURCE_PATH: ${{ vars.APP_SOURCE_PATH }}
+          PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+
+        run: |
+          set -euo pipefail
+          SRC="${APP_SOURCE_PATH%/}"
+
+          rm -rf build lambda-package.zip
+          mkdir -p build
+
+          REQ="$SRC/requirements.txt"
+          [[ -f "$REQ" ]] || REQ="requirements.txt"
+          if [[ -f "$REQ" ]]; then
+            pip install -r "$REQ" -t build/ \
+              --platform manylinux2014_x86_64 \
+              --implementation cp \
+              --python-version "$PYTHON_VERSION" 
+            
+          fi
+
+          cp -r "$SRC"/. build/
+          (cd build && zip -qr ../lambda-package.zip . -x "*.pyc" "*__pycache__/*" "tests/*")
+          ls -lh lambda-package.zip
+
+      # ======================================================================
+      # Configure AWS credentials (OIDC)
+      # ======================================================================
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # ======================================================================
+      # Deploy to Lambda
+      # ======================================================================
+      - name: Deploy to Lambda
+        id: lambda
+        shell: bash
+
+        env:
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+
+        run: |
+          set -euo pipefail
+
+          echo "Updating function: $FUNCTION_NAME"
+
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://lambda-package.zip
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          VERSION=$(aws lambda publish-version \
+            --function-name "$FUNCTION_NAME" \
+            --description "Deployed from $BRANCH @ ${GITHUB_SHA::7}" \
+            --query Version --output text)
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+
+      # ======================================================================
+      # DEPLOYMENT SUMMARY
+      # ======================================================================
+      - name: Deployment summary
+        shell: bash
+
+        env:
+          BRANCH: ${{ needs.resolve-environment.outputs.branch }}
+          ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          VERSION: ${{ steps.lambda.outputs.version }}
+
+        run: |
+          echo "=========================================="
+          echo "Deployment Completed"
+          echo "=========================================="
+          echo "Branch      : $BRANCH"
+          echo "Environment : $ENVIRONMENT"
+          echo "Function    : $FUNCTION_NAME"
+          echo "Version     : $VERSION"
+          echo "=========================================="
