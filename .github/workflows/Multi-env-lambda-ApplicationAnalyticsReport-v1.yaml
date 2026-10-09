@@ -22,9 +22,7 @@ permissions:
 # ============================================================================
 
 jobs:
-
   resolve-environment:
-
     name: Resolve deployment environment
 
     runs-on: ubuntu-24.04
@@ -37,7 +35,6 @@ jobs:
       branch: ${{ steps.resolve.outputs.branch }}
 
     steps:
-
       # ----------------------------------------------------------------------
       # Resolve environment from branch
       # ----------------------------------------------------------------------
@@ -99,14 +96,12 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
 
-
-# ============================================================================
-# JOB 2
-# Build and deploy Lambda application
-# ============================================================================
+  # ============================================================================
+  # JOB 2
+  # Build and deploy Lambda application
+  # ============================================================================
 
   deploy:
-
     name: Deploy Lambda to ${{ needs.resolve-environment.outputs.environment }}
 
     needs:
@@ -147,7 +142,6 @@ jobs:
       contents: read
 
     steps:
-
       # ======================================================================
       # DEPLOYMENT INFORMATION
       # ======================================================================
@@ -202,7 +196,7 @@ jobs:
           check REPORT_DAY_OFFSET 			      "${{ vars.REPORT_DAY_OFFSET }}"
           check REPORT_PERIOD_MODE            "${{ vars.REPORT_PERIOD_MODE }}"
           check SNS_TOPIC_ARN                 "${{ vars.SNS_TOPIC_ARN }}"
-          
+
           # Environment-specific configuration.
           case "$TARGET_ENV" in
 
@@ -236,7 +230,6 @@ jobs:
 
           echo "All required configuration values are present."
 
-
       # ======================================================================
       # Checkout selected branch
       # ======================================================================
@@ -247,12 +240,11 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-
       # ======================================================================
       # Setup .NET and build
       # ======================================================================
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v4.2.0
         with:
           dotnet-version: ${{ vars.DOTNET_VERSION }}
 
@@ -298,13 +290,12 @@ jobs:
         shell: bash
 
         env:
+          PDF_BUCKET_NAME: ${{ vars.PDF_BUCKET_NAME }}
+          REPORT_DAY_OFFSET: ${{ vars.REPORT_DAY_OFFSET }}
+          REPORT_PERIOD_MODE: ${{ vars.REPORT_PERIOD_MODE }}
+          SNS_TOPIC_ARN: ${{ vars.SNS_TOPIC_ARN }}
+          LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
 
-          PDF_BUCKET_NAME:               ${{ vars.PDF_BUCKET_NAME }}
-          REPORT_DAY_OFFSET: 			 ${{ vars.REPORT_DAY_OFFSET }}
-          REPORT_PERIOD_MODE:            ${{ vars.REPORT_PERIOD_MODE }}
-          SNS_TOPIC_ARN:                 ${{ vars.SNS_TOPIC_ARN }}
-          LAMBDA_FUNCTION_NAME:          ${{ vars.LAMBDA_FUNCTION_NAME }}
-         
         run: |
           set -euo pipefail
 
@@ -358,7 +349,6 @@ jobs:
 
           rm -f "$ENV_FILE"
 
-
       # ======================================================================
       # Deploy to Lambda
       # ======================================================================
@@ -396,7 +386,6 @@ jobs:
             --query Version --output text)
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
 
       # ======================================================================
       # DEPLOYMENT SUMMARY
