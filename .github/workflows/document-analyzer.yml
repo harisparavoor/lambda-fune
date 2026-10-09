@@ -1,4 +1,4 @@
-name: Multi-env-lambda-AppoinmentsProcessor-note-v1
+name: document-analyzer
 
 on:
   workflow_dispatch:
@@ -193,42 +193,11 @@ jobs:
           echo "Validating AWS/Lambda configuration..."
           check AWS_REGION                            "${{ vars.AWS_REGION }}"
           check LAMBDA_FUNCTION_NAME                  "${{ vars.LAMBDA_FUNCTION_NAME }}"
-          check DOTNET_VERSION                        "${{ vars.DOTNET_VERSION }}"
+          check PYTHON_VERSION                        "${{ vars.PYTHON_VERSION }}"
           check APP_SOURCE_PATH                       "${{ vars.APP_SOURCE_PATH }}"
           check AWS_ROLE_ARN                          "${{ secrets.AWS_ROLE_ARN }}"
 
-          echo "Validating application (Lambda environment) values..."
-          check PERSONNEL_BATCH_SIZE            "${{ vars.PERSONNEL_BATCH_SIZE }}"
-          check PROCESSOR_FUNCTION_NAME 		"${{ vars.PROCESSOR_FUNCTION_NAME }}"
-          check PURGE_CUTOFF_DAYS               "${{ vars.PURGE_CUTOFF_DAYS }}"
-          
-          
-          # Environment-specific configuration.
-          case "$TARGET_ENV" in
-
-            prod)
-              check "PROD_ENV_SPECIFIC_VALUE" "${{ vars.PROD_ENV_SPECIFIC_VALUE }}"
-              ;;
-
-            dev)
-              check "DEV_ENV_SPECIFIC_VALUE"  "${{ vars.DEV_ENV_SPECIFIC_VALUE }}"
-              ;;
-
-            sit)
-              check "SIT_ENV_SPECIFIC_VALUE"  "${{ vars.SIT_ENV_SPECIFIC_VALUE }}"
-              ;;
-
-            uat)
-              check "UAT_ENV_SPECIFIC_VALUE"  "${{ vars.UAT_ENV_SPECIFIC_VALUE }}"
-              ;;
-
-            *)
-              echo "::error::Unknown environment '$TARGET_ENV'."
-              missing=1
-              ;;
-
-          esac
-
+        
           if [[ "$missing" -ne 0 ]]; then
             echo "::error::One or more required configuration values are missing."
             exit 1
@@ -249,18 +218,19 @@ jobs:
 
 
       # ======================================================================
-      # Setup .NET and build
+      # Setup Python and build
       # ======================================================================
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5.6.0
         with:
-          dotnet-version: ${{ vars.DOTNET_VERSION }}
+          python-version: ${{ vars.PYTHON_VERSION }}
 
       - name: Build Lambda package
         shell: bash
 
         env:
           APP_SOURCE_PATH: ${{ vars.APP_SOURCE_PATH }}
+          PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
 
         run: |
           set -euo pipefail
@@ -269,15 +239,18 @@ jobs:
           rm -rf build lambda-package.zip
           mkdir -p build
 
-          dotnet restore "$SRC"
+          REQ="$SRC/requirements.txt"
+          [[ -f "$REQ" ]] || REQ="requirements.txt"
+          if [[ -f "$REQ" ]]; then
+            pip install -r "$REQ" -t build/ \
+              --platform manylinux2014_x86_64 \
+              --implementation cp \
+              --python-version "$PYTHON_VERSION" 
+            
+          fi
 
-          dotnet publish "$SRC" \
-            --configuration Release \
-            --runtime linux-x64 \
-            --self-contained false \
-            --output build
-
-          (cd build && zip -qr ../lambda-package.zip . -x "*.pdb")
+          cp -r "$SRC"/. build/
+          (cd build && zip -qr ../lambda-package.zip . -x "*.pyc" "*__pycache__/*" "tests/*")
           ls -lh lambda-package.zip
 
       # ======================================================================
@@ -291,72 +264,6 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       # ======================================================================
-      # UPDATE ENVIRONMENT VARIABLES (merge: add new, update existing, keep rest)
-      # ======================================================================
-
-      - name: Update Lambda environment variables
-        shell: bash
-
-        env:
-          PERSONNEL_BATCH_SIZE:         ${{ vars.PERSONNEL_BATCH_SIZE }}
-          PROCESSOR_FUNCTION_NAME: 		${{ vars.PROCESSOR_FUNCTION_NAME }}
-          PURGE_CUTOFF_DAYS:            ${{ vars.PURGE_CUTOFF_DAYS }}
-          LAMBDA_FUNCTION_NAME:         ${{ vars.LAMBDA_FUNCTION_NAME }}
-         
-        run: |
-          set -euo pipefail
-
-          # Names here become Lambda environment variable names.
-          # To add a new variable: add the name below, add it to this step's
-          # env block and to the validation step (env block + check line),
-          # then create it in the GitHub Environment variables.
-          NAMES=(
-
-          PERSONNEL_BATCH_SIZE        
-          PROCESSOR_FUNCTION_NAME 		
-          PURGE_CUTOFF_DAYS           
-          )
-
-          # ---- Build the new variable set ----
-          NEW='{}'
-          for name in "${NAMES[@]}"; do
-            NEW=$(jq -c --arg k "$name" --arg v "${!name}" '. + {($k): $v}' <<< "$NEW")
-          done
-
-          # ---- Read current Lambda variables ----
-          CURRENT=$(aws lambda get-function-configuration \
-            --function-name "$LAMBDA_FUNCTION_NAME" \
-            --query 'Environment.Variables' \
-            --output json)
-
-          if [[ -z "$CURRENT" || "$CURRENT" == "null" ]]; then
-            CURRENT='{}'
-          fi
-
-          # ---- Report changes (names only, values are never printed) ----
-          echo "Added   : $(jq -r -n --argjson c "$CURRENT" --argjson n "$NEW" '[$n|keys[]|select(. as $k|$c|has($k)|not)]|join(", ")')"
-          echo "Updated : $(jq -r -n --argjson c "$CURRENT" --argjson n "$NEW" '[$n|keys[]|select(. as $k|$c|has($k) and $c[$k] != $n[$k])]|join(", ")')"
-          echo "Kept    : $(jq -r -n --argjson c "$CURRENT" --argjson n "$NEW" '[$c|keys[]|select(. as $k|$n|has($k)|not)]|join(", ")')"
-
-          # ---- Merge: existing + new (new wins) ----
-          ENV_FILE="$RUNNER_TEMP/lambda-env.json"
-          umask 077
-          jq -c -n --argjson c "$CURRENT" --argjson n "$NEW" '{Variables: ($c + $n)}' > "$ENV_FILE"
-
-          aws lambda update-function-configuration \
-            --function-name "$LAMBDA_FUNCTION_NAME" \
-            --environment "file://$ENV_FILE" \
-            --query '{LastModified:LastModified,State:State,LastUpdateStatus:LastUpdateStatus}' \
-            --output table
-
-          echo "Waiting for configuration update to complete..."
-          aws lambda wait function-updated \
-            --function-name "$LAMBDA_FUNCTION_NAME"
-
-          rm -f "$ENV_FILE"
-
-
-      # ======================================================================
       # Deploy to Lambda
       # ======================================================================
       - name: Deploy to Lambda
@@ -366,7 +273,6 @@ jobs:
         env:
           FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           BRANCH: ${{ needs.resolve-environment.outputs.branch }}
-          LAMBDA_HANDLER: LambdaTest::EnvVarLambda.Function::FunctionHandler
 
         run: |
           set -euo pipefail
@@ -376,13 +282,6 @@ jobs:
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
             --zip-file fileb://lambda-package.zip
-
-          aws lambda wait function-updated \
-            --function-name "$FUNCTION_NAME"
-
-          aws lambda update-function-configuration \
-            --function-name "$FUNCTION_NAME" \
-            --handler "$LAMBDA_HANDLER"
 
           aws lambda wait function-updated \
             --function-name "$FUNCTION_NAME"
